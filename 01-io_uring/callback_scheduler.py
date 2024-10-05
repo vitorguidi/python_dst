@@ -12,6 +12,8 @@ class SQE:
     data: any
     callback: callable
 
+visited = {}
+
 class Node:
     def __init__(self, node_id: int, node_count: int):
         self._node_id = node_id
@@ -19,17 +21,24 @@ class Node:
 
     def handle_simple_rpc(self):
         yield #coroutine starting protocol
+        print(f'yielding {self._node_id} from handle simple rpc')
         yield self._node_id
 
     def handle_complex_rpc(self):
+        global visited
         yield #coroutine starting protocol
         count = 0
         print(f'running complex rpc in node {self._node_id}')
         for node in range(self._node_count):
             request = {'rpc': 'handle_simple_rpc', 'target_node': node}
-            print(f'node {self._node_id} yield req {request}')
-            yield SQE(data=request, callback=None)
-            count += 1
+            print(f'complex rpc task in node {self._node_id} yield req {request}')
+            data = yield SQE(data=request, callback=None)
+            print(f'node {self._node_id} received ok from node {data}')
+            if not self._node_id in visited:
+                visited[self._node_id] = {}
+            if not data in visited[self._node_id]:
+                visited[self._node_id][data] = 0
+            visited[self._node_id][data] += 1
         print(f'exiting complex rpc for node {self._node_id}')
 
 class Task:
@@ -43,13 +52,13 @@ class Task:
     def run(self, arg):
         result = self._coro.send(arg)
         self._last_returned_value = result
-        print(f'running task whose coro is {self._coro}, got result {result}')
+        print(f'running task {self._name}, got result {result}')
         return result
     
     def callback(self):
         if self._callback:
             assert self._last_returned_value is not None
-            print(f'self.callback = {self._callback}, retval = {self._last_returned_value}')
+            print(f'running callback for task {self._name}, retval = {self._last_returned_value}')
             self._callback(self._last_returned_value)
 
 class IOUring:
@@ -97,12 +106,11 @@ class Scheduler:
             # weave things with callback = lambda x : self._cqe.enqueue(x)
             [task, arg] = self._tasks.pop(0)
             assert type(task) == Task
-            print(f'task = {task._coro}')
+            print(f'dequeued task = {task._name}')
             try:
                 result = task.run(arg)
-                print(f'task coro = {task._coro}, arg = {arg}')
+                print(f'got result {result} running task {task._name}')
                 if type(result) == SQE:
-                    print('result = sqe')
                     # I need to bind current task value NOW otherwise this will bind
                     # to another value when coroutine stack dances around
                     def cqe_to_original_task_callback_factory(task):
@@ -110,9 +118,10 @@ class Scheduler:
                     # enqueue IO request, with the proper callback to resume once CQE gets popped
                     result.callback = cqe_to_original_task_callback_factory(task)
                     # Bug = enqueing simple rpc instead of complex rpc, so inf loop
-                    print(f'sqe to be enqueued = {result}')
+                    print(f'enqueuing {result} for task {task._name}')
                     self._io_uring.enqueue_sqe(result)
                 else:
+                    print(f'Adding task back to the scheduler: {task._name}')
                     self.add_task([task, None])
             except StopIteration:
                 task.callback()
@@ -125,14 +134,17 @@ class Scheduler:
                 print(f'dequeued sqe {sqe}')
             # Spawn a task that will create a CQE whose callback gives data to originator coro
                 req = sqe.data
+                # Bind this NOW, otherwise the value of sqe or task will change
+                # Once the coroutine leaves and comes back to this stack
                 def enqueue_cqe_callback_factory(sqe_callback):
                     return lambda x : self._io_uring.enqueue_cqe(CQE(x, sqe_callback))
                 callback = enqueue_cqe_callback_factory(sqe.callback) 
                 assert sqe is not None
-                print(f'req = {req}')
                 handler = self._rpc_mapping[req['target_node']]['handle_simple_rpc']()
                 tgt = req['target_node']
                 io_task = Task(handler, callback, f'handle_simple_rpc_node_{tgt}')
+                print(f'Enqueing IO task for SQE {sqe}')
+                print(f'Enqueued task {io_task._name}')
                 self.add_task([io_task, req])
 
 io_uring = IOUring()
@@ -145,10 +157,13 @@ sched = Scheduler(io_uring, nodes)
 
 sched.add_task( [Task(nodes[0].handle_complex_rpc(), None, 'complex_rpc_node_0'), None] )
 sched.add_task( [Task(nodes[1].handle_complex_rpc(), None, 'complex_rpc_node_1'), None] )
+sched.add_task( [Task(nodes[2].handle_complex_rpc(), None, 'complex_rpc_node_2'), None] )
 
 sched.run()
 
-
+for i in range(3):
+    for j in range(3):
+        assert visited[i][j] == 1
 #PROBLEMA: Como tratar um CQE quando ele exige RPC?
 
 # coro: yield cqe
