@@ -46,6 +46,9 @@ class RaftNode:
 
     def handle_leader(self):
         yield
+        if self._state != RaftState.CANDIDATE:
+            self._log(f'Exiting leader handler, because current state is {self._state}')
+            return
         self._log('handling_leader')
         for target_node in range(self._nr_nodes):
             request = AppendEntriesRequest(node_from=self._node_id, node_to=target_node, leader_id=self._node_id, term=self._term)
@@ -56,6 +59,9 @@ class RaftNode:
 
     def handle_follower(self):
         yield #Coro initialization protocol
+        if self._state != RaftState.CANDIDATE:
+            self._log(f'Exiting follower handler, because current state is {self._state}')
+            return
         self._log('handling follower')
         if self._clock.get_time() >= self._last_rpc_time + self._election_timeout:
             self._log(f'becoming candidate on node {self._node_id}')
@@ -64,6 +70,12 @@ class RaftNode:
 
     def handle_candidate(self):
         yield
+        
+        # Guard against this task being scheduled after state has changed in RPC handlers
+        if self._state != RaftState.CANDIDATE:
+            self._log(f'Exiting candidate handler, because current state is {self._state}')
+            return
+        
         self._log('handling candidate')
 
         self._log(f'node {self._node_id} is starting election on term {self._term}')
@@ -133,7 +145,6 @@ class RaftNode:
 
     def handle_request_vote_rpc(self):
         request = yield
-        self._log(type(request))
         assert isinstance(request, RequestVoteRequest)
         response = RequestVoteResponse(node_from=request.node_to, node_to=request.node_from, term=self._term, vote_granted=False)
         self._last_rpc_time = self._clock.get_time()

@@ -39,5 +39,5 @@ if __name__ == '__main__':
     # for i in range(1000):
     #     raft_cluster = Cluster(3, i, 5, 20)
     #     raft_cluster.start(tick_limit = 10000)
-    raft_cluster = Cluster(3, 141, 5, 20)
+    raft_cluster = Cluster(3, 315, 5, 20)
     raft_cluster.start(tick_limit = 10000)
