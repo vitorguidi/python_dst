@@ -68,6 +68,8 @@ class RaftNode:
 
         self._log(f'node {self._node_id} is starting election on term {self._term}')
 
+
+
         self._voted_for = self._node_id
         self._nr_votes = 1
         self._log(f'node {self._node_id} voted for iteself on term {self._term}, now has {self._nr_votes} votes')
@@ -146,7 +148,8 @@ class RaftNode:
         elif request.term < self._term:
             self._log(f'node {self._node_id} denied vote to node {request.node_from} on term {self._term}, because it was on smaller term {request.term}')
             response.vote_granted = False
-        elif self._voted_for == -1:
+        elif self._voted_for == -1 and self._state == RaftState.FOLLOWER:
+            self._log(f'node {self._node_id} granted vote to node {request.node_from} on term {self._term}, because it still did not vote this term')
             self._voted_for = request.candidate_id
             response.vote_granted = True
         else:
