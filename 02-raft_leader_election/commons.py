@@ -17,5 +17,5 @@ class RNG:
     def __init__(self, seed: int):
         random.seed(seed)
 
-    def generate(self):
-        return random.randint()
+    def generate(self, delay):
+        return random.randint(0, delay)
