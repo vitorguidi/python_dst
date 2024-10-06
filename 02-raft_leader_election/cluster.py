@@ -4,6 +4,7 @@ from dispatcher import Dispatcher
 from scheduler import Scheduler
 from io_uring import IOUring
 from task import Task
+from oracle import InvariantViolationException
 
 class Cluster:
     def __init__(self, nr_nodes, seed):
@@ -27,10 +28,7 @@ class Cluster:
             self._sched.tick()
             invariant_violations = self._oracle.assert_invariants()
             if invariant_violations != []:
-                print('On the round {tick} of simulation, the following invariant violations happened:')
-                for violation in invariant_violations:
-                    print(violation)
-                break
+                raise InvariantViolationException(invariant_violations, tick)
             tick+=1
 
 if __name__ == '__main__':
