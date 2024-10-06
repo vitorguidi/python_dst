@@ -8,6 +8,10 @@ from oracle import InvariantViolationException
 
 class Cluster:
     def __init__(self, nr_nodes, seed, task_delay_time, rpc_delay_time):
+        self._seed = seed
+        self._nr_nodes = nr_nodes
+        self._task_delay_time = task_delay_time
+        self._rpc_delay_time = rpc_delay_time
         self._clock = Clock()
         self._rng = RNG(seed)
         self._nodes = []
@@ -28,9 +32,12 @@ class Cluster:
             self._sched.tick()
             invariant_violations = self._oracle.assert_invariants()
             if invariant_violations != []:
-                raise InvariantViolationException(invariant_violations, tick)
+                raise InvariantViolationException(invariant_violations, tick, self._seed, self._nr_nodes, self._task_delay_time, self._rpc_delay_time)
             tick+=1
 
 if __name__ == '__main__':
-    raft_cluster = Cluster(3, 0, 5, 20)
-    raft_cluster.start(tick_limit = 1000000)
+    # for i in range(1000):
+    #     raft_cluster = Cluster(3, i, 5, 20)
+    #     raft_cluster.start(tick_limit = 10000)
+    raft_cluster = Cluster(3, 141, 5, 20)
+    raft_cluster.start(tick_limit = 10000)

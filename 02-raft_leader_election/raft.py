@@ -22,23 +22,31 @@ class RaftNode:
         self._election_timeout = 10
         self._nr_nodes = nr_nodes
 
+    def _log(self, message):
+        identifier = f'[{self._node_id}][{self._state}][{self._term}] '
+        print(f'{identifier}{message}')
+
     def _become_follower(self, term: int):
         self._term = term
+        self._nr_votes = 0
         self._voted_for = -1
         self._state = RaftState.FOLLOWER
+        self._log(f'node {self._node_id} is becoming a follower on term {self._term}')
 
     def _become_candidate(self):
         self._term += 1
         self._voted_for = -1
+        self._nr_votes = 0
         self._last_rpc_time = self._clock.get_time()
         self._state = RaftState.CANDIDATE
+        self._log(f'node {self._node_id} is becoming a candidate on term {self._term}')
 
     def _become_leader(self):
         self._state = RaftState.LEADER
 
     def handle_leader(self):
         yield
-        print('handling_leader')
+        self._log('handling_leader')
         for target_node in range(self._nr_nodes):
             request = AppendEntriesRequest(node_from=self._node_id, node_to=target_node, leader_id=self._node_id, term=self._term)
             response = yield request
@@ -48,25 +56,26 @@ class RaftNode:
 
     def handle_follower(self):
         yield #Coro initialization protocol
-        print('handling follower')
+        self._log('handling follower')
         if self._clock.get_time() >= self._last_rpc_time + self._election_timeout:
-            print(f'becoming candidate on node {self._node_id}')
+            self._log(f'becoming candidate on node {self._node_id}')
             self._become_candidate()
         return None  #For callbacks to work we always return something
 
     def handle_candidate(self):
         yield
-        print('handling candidate')
-        if self._clock.get_time() >= self._last_rpc_time + self._election_timeout:
-            self._become_candidate()
-            return None
+        self._log('handling candidate')
+
+        self._log(f'node {self._node_id} is starting election on term {self._term}')
 
         self._voted_for = self._node_id
-        nr_votes = 0
+        self._nr_votes = 1
+        self._log(f'node {self._node_id} voted for iteself on term {self._term}, now has {self._nr_votes} votes')
 
-        print(f'node {self._node_id} is starting election')
 
         for target_node in range(self._nr_nodes):
+            if target_node == self._node_id:
+                continue
             request = RequestVoteRequest(
                 node_from=self._node_id,
                 node_to = target_node,
@@ -78,18 +87,23 @@ class RaftNode:
             if response.term > self._term:
                 self._become_follower(response.term)
                 return None
-            if response.vote_granted:
-                nr_votes += 1
+            if response.vote_granted and response.term == self._term:
+                self._log(f'Node {self._node_id} received a vote from node {target_node} on term {self._term}')
+                self._nr_votes += 1
             
-        if nr_votes > self._nr_nodes/2:
+        if self._nr_votes > self._nr_nodes/2:
             self._become_leader()
-            print(f'Node {self._node_id} became leader on term {self._term}')
-        return None
+            self._log(f'Node {self._node_id} became leader on term {self._term}, with {self._nr_votes} votes')
+        yield None
 
     def raft_loop(self):
+        # vitorguidi@Vitors-Air 02-raft_leader_election % grep "\[RaftState.FOLLOWER\]" logs.txt | grep "handling candidate"
+        # [2][RaftState.FOLLOWER][67] handling candidate
+        # [0][RaftState.FOLLOWER][72] handling candidate
+        # RaftState out of sync with the handler coroutine, why?
         yield
         while True:
-            print(f'doing one round of raft on node {self._node_id}')
+            self._log(f'doing one round of raft on node {self._node_id}')
             if self._state == RaftState.LEADER:
                 leader_coro = self.handle_leader()
                 yield Task(leader_coro, None, f'node_{self._node_id }_leader_coro')
@@ -117,23 +131,27 @@ class RaftNode:
 
     def handle_request_vote_rpc(self):
         request = yield
-        print(type(request))
+        self._log(type(request))
         assert isinstance(request, RequestVoteRequest)
         response = RequestVoteResponse(node_from=request.node_to, node_to=request.node_from, term=self._term, vote_granted=False)
         self._last_rpc_time = self._clock.get_time()
+
         if request.term > self._term:
+            prev_term = self._term
             self._become_follower(request.term)
             self._voted_for = request.candidate_id
-            response.term = request.term
+            response.term = self._term
+            self._log(f'node {self._node_id} granted vote to node {request.node_from} on term {self._term}, after stepping down from round {prev_term}')
             response.vote_granted = True
         elif request.term < self._term:
-            response.vote_granted = False        
-        elif self._voted_for in [-1, request.candidate_id]:
+            self._log(f'node {self._node_id} denied vote to node {request.node_from} on term {self._term}, because it was on smaller term {request.term}')
+            response.vote_granted = False
+        elif self._voted_for == -1:
             self._voted_for = request.candidate_id
             response.vote_granted = True
         else:
             response.vote_granted = False
-
+        
         response.term = self._term
         yield response
 

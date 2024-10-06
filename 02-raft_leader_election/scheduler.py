@@ -14,7 +14,10 @@ class TaskEntry:
     argument: any
 
     def __str__(self) -> str:
-        return f'[task={self.task._name} - tid={self.task.task_id} - dequeue_time={self.dequeue_time} - arg={self.argument}]'
+        return f'[task={self.task._name} - tid={self.task_id} - dequeue_time={self.dequeue_time} - arg={self.argument}]'
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
     def __lt__(self, other):
         """Custom comparison function for the min heap."""
@@ -37,7 +40,8 @@ class Scheduler:
     def add_task(self, task, arg, delay):
         dequeue_time = self._clock.get_time() + self._rng.generate(delay)
         entry = TaskEntry(task=task, argument=arg, task_id=self._task_id, dequeue_time=dequeue_time)
-        self._tasks.append(entry)
+        heapq.heappush(self._tasks, entry)
+        self._task_id += 1
 
     def tick(self):
         self._tick_tasks()
@@ -79,7 +83,7 @@ class Scheduler:
         arg = task_entry.argument
         assert type(task) == Task
 
-        print(f'dequeued task = {TaskEntry}, at time {self._clock.get_time()}')
+        print(f'dequeued task = {task_entry}, at time {self._clock.get_time()}')
         try:
             result = task.run(arg)
             self._clock.tick()
@@ -108,8 +112,12 @@ class Scheduler:
             task.callback()
 
 if __name__ == '__main__':
-    t1 = TaskEntry(task=None, task_id = 0, dequeue_time=0, argument=None)
-    t2 = TaskEntry(task=None, task_id = 1, dequeue_time=0, argument=None)
-    t3 = TaskEntry(task=None, task_id = 2, dequeue_time=1, argument=None)
+    def dummy_coro():
+        yield
+        yield 2
+    t1 = TaskEntry(task=Task(dummy_coro(), None, 'random task 1'), task_id = 0, dequeue_time=0, argument=None)
+    t2 = TaskEntry(task=Task(dummy_coro(), None, 'random task 2'), task_id = 1, dequeue_time=0, argument=None)
+    t3 = TaskEntry(task=Task(dummy_coro(), None, 'random task 3'), task_id = 2, dequeue_time=1, argument=None)
     assert t1 < t2
     assert t2 < t3
+    print(t3)
