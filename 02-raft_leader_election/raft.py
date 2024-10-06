@@ -2,6 +2,8 @@ from rpc import AppendEntriesRequest, AppendEntriesResponse, RequestVoteRequest,
 from commons import Clock, RNG
 from enum import Enum
 from task import Task
+from oracle import Oracle
+import functools
 
 class RaftState(Enum):
     FOLLOWER=0
@@ -134,3 +136,27 @@ class RaftNode:
 
         response.term = self._term
         yield response
+
+class RaftOracle(Oracle):
+    def __init__(self, nodes):
+        self._nodes = nodes
+        self._leader_history = {}
+        self._assertion_failures = []
+
+    def assert_invariants(self):
+        self._assert_election_safety_invariant()
+        return self._assertion_failures
+
+    def _assert_election_safety_invariant(self):
+        for node in self._nodes:
+            node_term = node._term
+            node_id = node._node_id
+            node_state = node._state
+            if node_state != RaftState.LEADER:
+                continue
+            if not node_term in self._leader_history:
+                self._leader_history[node_term] = node_id
+                continue
+            term_leader = self._leader_history[node_term]
+            if term_leader != node_id:
+                self._assertion_failures.append(f'Node {node_id} considers itself leader on term {node_term}, but so does node {term_leader}. The election safety invariant does not hold.')

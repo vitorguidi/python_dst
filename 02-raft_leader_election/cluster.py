@@ -1,5 +1,5 @@
 from commons import Clock, RNG
-from raft import RaftNode
+from raft import RaftNode, RaftOracle
 from dispatcher import Dispatcher
 from scheduler import Scheduler
 from io_uring import IOUring
@@ -14,6 +14,7 @@ class Cluster:
             node = RaftNode(i, self._clock, nr_nodes)
             self._nodes.append(node)
         dispatcher = Dispatcher(self._nodes)
+        self._oracle = RaftOracle(self._nodes)
         self._sched = Scheduler(IOUring(), dispatcher, self._clock)
         for node in self._nodes:
             self._sched.add_task([Task(node.raft_loop(), None, f'node_{node._node_id}_raft_loop)'), None])
@@ -24,6 +25,12 @@ class Cluster:
             if tick_limit is not None and tick > tick_limit:
                 break
             self._sched.tick()
+            invariant_violations = self._oracle.assert_invariants()
+            if invariant_violations != []:
+                print('On the round {tick} of simulation, the following invariant violations happened:')
+                for violation in invariant_violations:
+                    print(violation)
+                break
             tick+=1
 
 if __name__ == '__main__':
